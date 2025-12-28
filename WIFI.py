@@ -152,7 +152,6 @@ AUTH_SERVERS = [
 
 AUTH_URL_PATH = "/eportal/portal/login"
 CHECK_INTERVAL = 3600
-DEFAULT_IP = "172.17.14.69"
 
 TARGET_WIFI_SSID = "SZU_CTC&CMCC"
 
@@ -743,18 +742,18 @@ class CampusNetLogin:
             except socket.error:
                 return None
 
-    def extract_ip_from_response(self, text: str) -> str:
-        """从响应文本中提取IP地址"""
+    def extract_ip_from_response(self, text: str) -> Optional[str]:
+        """从响应文本中提取IP地址（移除固定IP兜底）"""
         try:
             pattern = re.compile(r"v46ip='(?P<ip>\d+\.\d+\.\d+\.\d+)'", re.S)
             match = pattern.search(text)
             if match:
                 return match.group("ip")
-            return DEFAULT_IP
+            return None  # 提取失败返回None，不再返回固定IP
         except Exception:
-            return DEFAULT_IP
+            return None
 
-    def build_login_url(self, server: Dict[str, Any], username: str, password: str, ip: str) -> str:
+    def build_login_url(self, server: Dict[str, Any], username: str, password: str, ip: Optional[str]) -> str:
         """构建登录URL"""
         base_url = f"http://{server['host']}:{server['port']}{AUTH_URL_PATH}"
         params = {
@@ -762,7 +761,7 @@ class CampusNetLogin:
             "login_method": "1",
             "user_account": f",0,{username}",
             "user_password": password,
-            "wlan_user_ip": ip,
+            "wlan_user_ip": ip or "",  # 处理ip可能为None的情况
             "wlan_user_ipv6": "",
             "wlan_user_mac": "000000000000",
             "wlan_ac_ip": "",
@@ -777,7 +776,7 @@ class CampusNetLogin:
         return f"{base_url}?{param_str}"
 
     def login(self, username: str, password: str, ip: Optional[str] = None) -> Tuple[bool, str]:
-        """执行登录操作 - 纯WiFi网络版本"""
+        """执行登录操作 - 纯WiFi网络版本（加固IP抓取）"""
         # ========== 新增：登录时同步更新触发时间 ==========
         self.last_trigger_time = time.time()
         
@@ -812,11 +811,15 @@ class CampusNetLogin:
             else:
                 logger.info("网络物理连接存在，但HTTP访问失败，需要进行认证")
         
-        # 4. 获取IP地址用于认证
+        # 4. 获取IP地址用于认证（增加重试）
         if not ip:
             ip = self.get_local_ip()
+            # 第一次抓取失败，清空缓存后重试一次
             if not ip:
-                return False, "无法获取本地IP地址"
+                self._cached_ip = None  # 清空缓存
+                ip = self.get_local_ip()
+            if not ip:
+                return False, "无法获取本地IP地址，请检查网络连接"
         
         # 5. 快速服务器选择：优先主服务器，减少探测时间
         server = self._get_available_server_fast()
@@ -860,14 +863,19 @@ class CampusNetLogin:
                 return server
         return None
 
-    def _get_server_ip_optimized(self, server: Dict[str, Any]) -> str:
-        """优化的服务器IP获取"""
+    def _get_server_ip_optimized(self, server: Dict[str, Any]) -> Optional[str]:
+        """优化的服务器IP获取（仅依赖自动抓取IP）"""
         try:
             response = self.session.get(f"http://{server['host']}", timeout=3)
             response.raise_for_status()
-            return self.extract_ip_from_response(response.text)
+            extracted_ip = self.extract_ip_from_response(response.text)
+            if extracted_ip:
+                return extracted_ip
+            # 提取失败时，返回自动抓取的IP
+            return self.get_local_ip()
         except:
-            return DEFAULT_IP
+            # 请求失败时，也返回自动抓取的IP
+            return self.get_local_ip()
 
     def _parse_login_response_fast(self, login_response, username: str, password: str) -> Tuple[bool, str]:
         """快速登录响应解析"""
@@ -960,7 +968,7 @@ class CampusNetLogin:
         
         # 快速登录：直接用缓存IP + 主服务器，跳过服务器探测
         server = AUTH_SERVERS[0]  # 优先主服务器，不探测
-        ip = self._cached_ip or DEFAULT_IP  # 用缓存IP或默认IP，不获取新IP
+        ip = self._cached_ip or self.get_local_ip()  # 用缓存IP或自动获取IP，不再使用固定IP
         if server and not self.is_network_connected_http():
             success, msg = self.login(self.username, self.password, ip)
             logger.info(f"开机自启登录结果: {success}, {msg}")
