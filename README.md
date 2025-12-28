@@ -49,8 +49,8 @@
 ### 方法二：使用预编译的可执行文件
 
 1. 从 [Releases](https://github.com/your-username/campus-wifi-auto-login/releases) 页面下载最新版本
-2. 解压后双击运行 `校园网WiFi自动登录.exe`
-3. 首次使用需输入校园网账号密码并保存
+2. 下载后双击运行 `WiFi.exe`
+3. 首次使用需输入校园网账号密码，自动保存，开机静默后台运行，5分钟检测一次网络状态，自动重登。
 
 ## 🚀 快速开始
 
@@ -130,5 +130,6 @@ WIFI/
 <div align="center">
 
 Made with ❤️ for campus network users
+
 
 </div>
